@@ -63,7 +63,3 @@ desktop.ini
 # Logs
 *.log
 logs/
-
-#locks
-uv.lock
-skills-lock.json
