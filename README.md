@@ -158,6 +158,8 @@ uv run src/agent.py dev
 ```
 
 The agent will be available in the LiveKit Playground where you can chat via browser instead of phone.
+URL: https://agents-playground.livekit.io
+Type Agent name : casual-caller and press connect.
 
 ## Troubleshooting
 
