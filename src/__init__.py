@@ -1,0 +1,1 @@
+"""Voice AI CLI - A LiveKit-based voice agent that makes outbound calls."""
