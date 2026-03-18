@@ -17,7 +17,7 @@ from livekit.agents import (
     room_io,
 )
 from livekit.plugins import noise_cancellation, silero
-from livekit.plugins.turn_detector.multilingual import MultilingualModel
+from livekit.plugins import openai, deepgram, cartesia
 
 load_dotenv(".env.local")
 
@@ -128,13 +128,24 @@ async def casual_caller_agent(ctx: agents.JobContext):
         print("Warning: SIP_OUTBOUND_TRUNK_ID not set. Cannot make outbound calls.")
         print("Set your outbound trunk ID in the .env.local file.")
     
-    # Create agent session with voice pipeline
+    # Create agent session with voice pipeline using direct provider plugins
+    # NOTE: Using your own API keys (OPENAI_API_KEY, DEEPGRAM_API_KEY, CARTESIA_API_KEY)
+    # instead of LiveKit Cloud Inference
     session = AgentSession(
-        stt="deepgram/nova-3:multi",
-        llm="openai/gpt-4.1-mini",
-        tts="cartesia/sonic-3:9626c31c-bec5-4cca-baa8-f8ba9e84c8bc",
+        stt=deepgram.STT(
+            model="nova-3",
+            language="multi",
+        ),
+        llm=openai.responses.LLM(
+            model="gpt-4.1-mini",
+        ),
+        tts=cartesia.TTS(
+            model="sonic-3",
+            voice="9626c31c-bec5-4cca-baa8-f8ba9e84c8bc",
+        ),
         vad=silero.VAD.load(),
-        turn_detection=MultilingualModel(),
+        # NOTE: Removed MultilingualModel() as it requires LiveKit Cloud Inference
+        # Using VAD-based turn detection instead (built into AgentSession when turn_detection is not specified)
     )
 
     # Start the session with telephony-optimized noise cancellation

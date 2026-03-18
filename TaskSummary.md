@@ -109,3 +109,49 @@ Then connect via [LiveKit Playground](https://agents.livekit.io) to test via bro
 6. Call ends via end_call tool or user hangs up
 
 The implementation follows LiveKit best practices including proper testing, telephony optimization, and voice-optimized agent instructions.
+
+## Local Inference
+
+## Files Modified
+
+### 1. `src/agent.py`
+**Changes:**
+- **Replaced imports:** Added `from livekit.plugins import openai, deepgram, cartesia`
+- **Removed:** `MultilingualModel` import (this is a proprietary LiveKit Cloud model)
+- **Updated Session Configuration:**
+  - **STT:** Changed from string descriptor `"deepgram/nova-3:multi"` to direct plugin: `deepgram.STT(model="nova-3", language="multi")`
+  - **LLM:** Changed from string descriptor `"openai/gpt-4.1-mini"` to direct plugin: `openai.responses.LLM(model="gpt-4.1-mini")`
+  - **TTS:** Changed from string descriptor `"cartesia/sonic-3:..."` to direct plugin: `cartesia.TTS(model="sonic-3", voice="...")`
+  - **Turn Detection:** Removed `MultilingualModel()` - using VAD-based turn detection instead (built-in when not specified)
+
+### 2. `.env.local`
+**Added Direct Provider API Keys:**
+```bash
+OPENAI_API_KEY=your-openai-api-key-here
+DEEPGRAM_API_KEY=your-deepgram-api-key-here
+CARTESIA_API_KEY=your-cartesia-api-key-here
+```
+
+## What's Different
+
+| Component | Before (LiveKit Inference) | After (Your Own Keys) |
+|-----------|------------------------------|------------------------|
+| **STT** | LiveKit Cloud routes to Deepgram | Direct Deepgram API connection |
+| **LLM** | LiveKit Cloud routes to OpenAI | Direct OpenAI API connection |
+| **TTS** | LiveKit Cloud routes to Cartesia | Direct Cartesia API connection |
+| **Turn Detection** | AI-powered MultilingualModel | VAD-based detection |
+
+## Important Notes
+
+1. **Get Your API Keys:**
+   - OpenAI: https://platform.openai.com/api-keys
+   - Deepgram: https://console.deepgram.com/
+   - Cartesia: https://play.cartesia.ai/keys
+
+2. **MultilingualModel Removed:** This was the only component requiring LiveKit Cloud Inference. It's a proprietary AI model for context-aware turn detection. The agent now uses VAD-based detection which is less sophisticated but fully self-hosted.
+
+3. **LiveKit Server:** You're still using LiveKit Cloud for the WebRTC/media transport (`LIVEKIT_URL`). To be 100% independent, deploy your own LiveKit server (see https://docs.livekit.io/transport/self-hosting/).
+
+4. **Dependencies:** Your `pyproject.toml` already has the required plugins: `livekit-plugins-openai`, `livekit-plugins-deepgram`, `livekit-plugins-cartesia`.
+
+5. **Costs:** You'll now manage billing directly with OpenAI, Deepgram, and Cartesia instead of through LiveKit Cloud.
