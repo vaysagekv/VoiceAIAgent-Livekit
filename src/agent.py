@@ -138,8 +138,8 @@ async def casual_caller_agent(ctx: agents.JobContext):
             "Get your token from https://huggingface.co/settings/tokens"
         )
 
-    # HuggingFace Inference API base URL
-    hf_base_url = "https://api-inference.huggingface.co/v1"
+    # HuggingFace Inference API base URL (Router API)
+    hf_base_url = "https://router.huggingface.co/v1"
 
     session = AgentSession(
         stt=openai.STT(
@@ -153,7 +153,7 @@ async def casual_caller_agent(ctx: agents.JobContext):
             api_key=hf_api_key,
             base_url=hf_base_url,
             temperature=0.7,
-            max_tokens=256,
+            max_completion_tokens=256,
         ),
         tts=openai.TTS(
             model="espnet/fairseq_tts",  # Note: HF OpenAI-compatible API has limited TTS support
