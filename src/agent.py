@@ -17,7 +17,7 @@ from livekit.agents import (
     room_io,
 )
 from livekit.plugins import noise_cancellation, silero
-from livekit.plugins import openai
+from livekit.plugins import groq, openai
 
 load_dotenv(".env.local")
 
@@ -128,38 +128,47 @@ async def casual_caller_agent(ctx: agents.JobContext):
         print("Warning: SIP_OUTBOUND_TRUNK_ID not set. Cannot make outbound calls.")
         print("Set your outbound trunk ID in the .env.local file.")
     
-    # Create agent session with voice pipeline using HuggingFace Inference API
-    # NOTE: Using HuggingFace models via OpenAI-compatible API
-    # Set HF_API_KEY in your environment variables
+    # Load API keys
     hf_api_key = os.getenv("HF_API_KEY")
+    groq_api_key = os.getenv("GROQ_API_KEY")
+
     if not hf_api_key:
         raise ValueError(
             "HF_API_KEY environment variable is required. "
             "Get your token from https://huggingface.co/settings/tokens"
         )
 
+    if not groq_api_key:
+        raise ValueError(
+            "GROQ_API_KEY environment variable is required. "
+            "Get your API key from https://console.groq.com/keys"
+        )
+
     # HuggingFace Inference API base URL (Router API)
     hf_base_url = "https://router.huggingface.co/v1"
 
+    # Get optional model configurations from environment
+    groq_stt_model = os.getenv("GROQ_STT_MODEL", "whisper-large-v3-turbo")
+    groq_tts_model = os.getenv("GROQ_TTS_MODEL", "playai-tts")
+    groq_tts_voice = os.getenv("GROQ_TTS_VOICE", "Arista-PlayAI")
+    hf_llm_model = os.getenv("HF_LLM_MODEL", "meta-llama/Llama-3.1-8B-Instruct")
+
+    # Create agent session with Groq STT/TTS + HuggingFace LLM
     session = AgentSession(
-        stt=openai.STT(
-            model="openai/whisper-large-v3",  # HuggingFace Whisper model
-            api_key=hf_api_key,
-            base_url=hf_base_url,
+        stt=groq.STT(
+            model=groq_stt_model,
             language="en",
         ),
         llm=openai.LLM(
-            model="meta-llama/Llama-3.1-8B-Instruct",  # or microsoft/DialoGPT-medium, mistralai/Mistral-7B-Instruct
+            model=hf_llm_model,
             api_key=hf_api_key,
             base_url=hf_base_url,
             temperature=0.7,
             max_completion_tokens=256,
         ),
-        tts=openai.TTS(
-            model="espnet/fairseq_tts",  # Note: HF OpenAI-compatible API has limited TTS support
-            api_key=hf_api_key,
-            base_url=hf_base_url,
-            voice="default",
+        tts=groq.TTS(
+            model=groq_tts_model,
+            voice=groq_tts_voice,
         ),
         vad=silero.VAD.load(),
         # NOTE: Removed MultilingualModel() as it requires LiveKit Cloud Inference

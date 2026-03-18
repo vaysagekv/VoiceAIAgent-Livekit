@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "Voice AI CLI agent that makes outbound phone calls and has casual conversations"
 requires-python = ">=3.10"
 dependencies = [
-    "livekit-agents~=1.4",
+    "livekit-agents[groq]~=1.4",
     "livekit-api",
     "livekit-plugins-deepgram",
     "livekit-plugins-openai",

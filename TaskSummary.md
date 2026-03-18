@@ -22,11 +22,11 @@ VoiceAIAgent/
 - **Agent Name**: `casual-caller`
 - **Personality**: Friendly, engaging conversationalist
 - **Voice Pipeline**:
-  - STT: Deepgram Nova-3 (real-time transcription)
-  - LLM: OpenAI GPT-4.1 mini (via LiveKit Inference)
-  - TTS: Cartesia Sonic-3 (natural speech synthesis)
+  - STT: Groq Whisper (fast transcription via `whisper-large-v3-turbo`)
+  - LLM: HuggingFace Llama-3.1-8B-Instruct (via Inference API)
+  - TTS: Groq PlayAI (natural speech synthesis via `playai-tts`)
   - VAD: Silero (voice activity detection)
-  - Turn Detection: Multilingual model (natural turn-taking)
+  - Turn Detection: VAD-based (built into AgentSession)
 - **Tools**: `end_call` function tool for graceful call termination
 - **Telephony Optimized**: Noise cancellation for SIP calls
 
@@ -110,51 +110,73 @@ Then connect via [LiveKit Playground](https://agents.livekit.io) to test via bro
 
 The implementation follows LiveKit best practices including proper testing, telephony optimization, and voice-optimized agent instructions.
 
-## Local Inference
-
-## Files Modified
+## Groq Integration (Current)
 
 ### 1. `src/agent.py`
 **Changes:**
-- **Replaced imports:** Added `from livekit.plugins import openai, deepgram, cartesia`
-- **Removed:** `MultilingualModel` import (this is a proprietary LiveKit Cloud model)
+- **Added imports:** `from livekit.plugins import groq, openai`
 - **Updated Session Configuration:**
-  - **STT:** Changed from string descriptor `"deepgram/nova-3:multi"` to direct plugin: `deepgram.STT(model="nova-3", language="multi")`
-  - **LLM:** Changed from string descriptor `"openai/gpt-4.1-mini"` to direct plugin: `openai.responses.LLM(model="gpt-4.1-mini")`
-  - **TTS:** Changed from string descriptor `"cartesia/sonic-3:..."` to direct plugin: `cartesia.TTS(model="sonic-3", voice="...")`
-  - **Turn Detection:** Removed `MultilingualModel()` - using VAD-based turn detection instead (built-in when not specified)
+  - **STT:** `groq.STT(model="whisper-large-v3-turbo", language="en")`
+  - **LLM:** HuggingFace via OpenAI-compatible API (`openai.LLM` with HF base_url)
+  - **TTS:** `groq.TTS(model="playai-tts", voice="Arista-PlayAI")`
+  - **Turn Detection:** VAD-based (built into AgentSession)
 
 ### 2. `.env.local`
-**Added Direct Provider API Keys:**
+**API Keys:**
 ```bash
-OPENAI_API_KEY=your-openai-api-key-here
-DEEPGRAM_API_KEY=your-deepgram-api-key-here
-CARTESIA_API_KEY=your-cartesia-api-key-here
+# Groq (for STT and TTS - free tier available)
+GROQ_API_KEY=gsk_xxx  # Get from https://console.groq.com/keys
+
+# HuggingFace (for LLM only)
+HF_API_KEY=hf_xxx  # Get from https://huggingface.co/settings/tokens
+```
+
+### 3. `pyproject.toml`
+**Added dependency:**
+```toml
+livekit-plugins-groq
 ```
 
 ## What's Different
 
-| Component | Before (LiveKit Inference) | After (Your Own Keys) |
-|-----------|------------------------------|------------------------|
-| **STT** | LiveKit Cloud routes to Deepgram | Direct Deepgram API connection |
-| **LLM** | LiveKit Cloud routes to OpenAI | Direct OpenAI API connection |
-| **TTS** | LiveKit Cloud routes to Cartesia | Direct Cartesia API connection |
-| **Turn Detection** | AI-powered MultilingualModel | VAD-based detection |
+| Component | Before (HuggingFace) | After (Groq + HuggingFace) |
+|-----------|----------------------|----------------------------|
+| **STT** | HuggingFace Whisper API (via OpenAI-compatible endpoint) | Groq Whisper (faster inference) |
+| **LLM** | HuggingFace Llama-3.1-8B-Instruct | HuggingFace Llama-3.1-8B-Instruct (unchanged) |
+| **TTS** | HuggingFace espnet/fairseq_tts (limited) | Groq PlayAI (natural, high-quality voices) |
+| **Turn Detection** | VAD-based | VAD-based (unchanged) |
 
-## Important Notes
+## Benefits of Groq Integration
 
-1. **Get Your API Keys:**
-   - OpenAI: https://platform.openai.com/api-keys
-   - Deepgram: https://console.deepgram.com/
-   - Cartesia: https://play.cartesia.ai/keys
+1. **Faster Inference:** Groq's LPU (Language Processing Unit) delivers ultra-low latency
+2. **Better TTS Quality:** PlayAI voices are significantly more natural than HuggingFace TTS
+3. **Free Tier:** Groq offers generous free tier for prototyping
+4. **Simple Integration:** Native LiveKit plugin, no custom wrappers needed
 
-2. **MultilingualModel Removed:** This was the only component requiring LiveKit Cloud Inference. It's a proprietary AI model for context-aware turn detection. The agent now uses VAD-based detection which is less sophisticated but fully self-hosted.
+## Available Groq Models
 
-3. **LiveKit Server:** You're still using LiveKit Cloud for the WebRTC/media transport (`LIVEKIT_URL`). To be 100% independent, deploy your own LiveKit server (see https://docs.livekit.io/transport/self-hosting/).
+| Component | Models | Default |
+|-----------|--------|---------|
+| **STT** | `whisper-large-v3`, `whisper-large-v3-turbo` | `whisper-large-v3-turbo` |
+| **LLM** | `llama-3.3-70b-versatile`, `gpt-oss-120b`, `llama3-8b-8192`, etc. | Via HuggingFace |
+| **TTS** | `playai-tts` | `playai-tts` |
 
-4. **Dependencies:** Your `pyproject.toml` already has the required plugins: `livekit-plugins-openai`, `livekit-plugins-deepgram`, `livekit-plugins-cartesia`.
+**Available TTS Voices:** `Arista-PlayAI` (default), `Atlas-PlayAI`, `Aurora-PlayAI`, `Luna-PlayAI`, `Stella-PlayAI`
 
-5. **Costs:** You'll now manage billing directly with OpenAI, Deepgram, and Cartesia instead of through LiveKit Cloud.
+## Environment Variables
+
+Configure via `.env.local`:
+```bash
+# Required
+GROQ_API_KEY=gsk_xxx
+HF_API_KEY=hf_xxx
+
+# Optional overrides
+GROQ_STT_MODEL=whisper-large-v3-turbo
+GROQ_TTS_MODEL=playai-tts
+GROQ_TTS_VOICE=Arista-PlayAI
+HF_LLM_MODEL=meta-llama/Llama-3.1-8B-Instruct
+```
 
 
 ## Plan for HuggingFace
