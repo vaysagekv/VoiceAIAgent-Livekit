@@ -17,7 +17,7 @@ from livekit.agents import (
     room_io,
 )
 from livekit.plugins import noise_cancellation, silero
-from livekit.plugins import openai, deepgram, cartesia
+from livekit.plugins import openai
 
 load_dotenv(".env.local")
 
@@ -128,20 +128,38 @@ async def casual_caller_agent(ctx: agents.JobContext):
         print("Warning: SIP_OUTBOUND_TRUNK_ID not set. Cannot make outbound calls.")
         print("Set your outbound trunk ID in the .env.local file.")
     
-    # Create agent session with voice pipeline using direct provider plugins
-    # NOTE: Using your own API keys (OPENAI_API_KEY, DEEPGRAM_API_KEY, CARTESIA_API_KEY)
-    # instead of LiveKit Cloud Inference
+    # Create agent session with voice pipeline using HuggingFace Inference API
+    # NOTE: Using HuggingFace models via OpenAI-compatible API
+    # Set HF_API_KEY in your environment variables
+    hf_api_key = os.getenv("HF_API_KEY")
+    if not hf_api_key:
+        raise ValueError(
+            "HF_API_KEY environment variable is required. "
+            "Get your token from https://huggingface.co/settings/tokens"
+        )
+
+    # HuggingFace Inference API base URL
+    hf_base_url = "https://api-inference.huggingface.co/v1"
+
     session = AgentSession(
-        stt=deepgram.STT(
-            model="nova-3",
-            language="multi",
+        stt=openai.STT(
+            model="openai/whisper-large-v3",  # HuggingFace Whisper model
+            api_key=hf_api_key,
+            base_url=hf_base_url,
+            language="en",
         ),
-        llm=openai.responses.LLM(
-            model="gpt-4.1-mini",
+        llm=openai.LLM(
+            model="meta-llama/Llama-3.1-8B-Instruct",  # or microsoft/DialoGPT-medium, mistralai/Mistral-7B-Instruct
+            api_key=hf_api_key,
+            base_url=hf_base_url,
+            temperature=0.7,
+            max_tokens=256,
         ),
-        tts=cartesia.TTS(
-            model="sonic-3",
-            voice="9626c31c-bec5-4cca-baa8-f8ba9e84c8bc",
+        tts=openai.TTS(
+            model="espnet/fairseq_tts",  # Note: HF OpenAI-compatible API has limited TTS support
+            api_key=hf_api_key,
+            base_url=hf_base_url,
+            voice="default",
         ),
         vad=silero.VAD.load(),
         # NOTE: Removed MultilingualModel() as it requires LiveKit Cloud Inference
