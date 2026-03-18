@@ -17,7 +17,7 @@ from livekit.agents import (
     room_io,
 )
 from livekit.plugins import noise_cancellation, silero
-from livekit.plugins import groq, openai
+from livekit.plugins import groq
 
 load_dotenv(".env.local")
 
@@ -129,14 +129,7 @@ async def casual_caller_agent(ctx: agents.JobContext):
         print("Set your outbound trunk ID in the .env.local file.")
     
     # Load API keys
-    hf_api_key = os.getenv("HF_API_KEY")
     groq_api_key = os.getenv("GROQ_API_KEY")
-
-    if not hf_api_key:
-        raise ValueError(
-            "HF_API_KEY environment variable is required. "
-            "Get your token from https://huggingface.co/settings/tokens"
-        )
 
     if not groq_api_key:
         raise ValueError(
@@ -144,27 +137,25 @@ async def casual_caller_agent(ctx: agents.JobContext):
             "Get your API key from https://console.groq.com/keys"
         )
 
-    # HuggingFace Inference API base URL (Router API)
-    hf_base_url = "https://router.huggingface.co/v1"
-
     # Get optional model configurations from environment
     groq_stt_model = os.getenv("GROQ_STT_MODEL", "whisper-large-v3-turbo")
-    # Note: Groq TTS now uses canopylabs/orpheus-v1-english as the default model
-    # and "autumn" as the default voice (playai-tts and Arista-PlayAI are deprecated)
-    groq_tts_model = os.getenv("GROQ_TTS_MODEL", "canopylabs/orpheus-v1-english")
-    groq_tts_voice = os.getenv("GROQ_TTS_VOICE", "autumn")
-    hf_llm_model = os.getenv("HF_LLM_MODEL", "meta-llama/Llama-3.1-8B-Instruct")
+    groq_llm_model = os.getenv("GROQ_LLM_MODEL", "llama-3.3-70b-versatile")
+    # Groq TTS - using PlayAI models
+    # Available models: "playai-tts", "playai-tts-arabic"
+    # Available voices for playai-tts: "Arista-PlayAI", "Atlas-PlayAI", "Basil-PlayAI", 
+    #   "Bridget-PlayAI", "Caldwell-PlayAI", "Cam-PlayAI", "Cecily-PlayAI", 
+    #   "Charlotte-PlayAI", "Chelsie-PlayAI", "Drexton-PlayAI"
+    groq_tts_model = os.getenv("GROQ_TTS_MODEL", "playai-tts")
+    groq_tts_voice = os.getenv("GROQ_TTS_VOICE", "Arista-PlayAI")
 
-    # Create agent session with Groq STT/TTS + HuggingFace LLM
+    # Create agent session with Groq for everything (STT, LLM, TTS)
     session = AgentSession(
         stt=groq.STT(
             model=groq_stt_model,
             language="en",
         ),
-        llm=openai.LLM(
-            model=hf_llm_model,
-            api_key=hf_api_key,
-            base_url=hf_base_url,
+        llm=groq.LLM(
+            model=groq_llm_model,
             temperature=0.7,
             max_completion_tokens=256,
         ),
@@ -173,8 +164,6 @@ async def casual_caller_agent(ctx: agents.JobContext):
             voice=groq_tts_voice,
         ),
         vad=silero.VAD.load(),
-        # NOTE: Removed MultilingualModel() as it requires LiveKit Cloud Inference
-        # Using VAD-based turn detection instead (built into AgentSession when turn_detection is not specified)
     )
 
     # Start the session with telephony-optimized noise cancellation
