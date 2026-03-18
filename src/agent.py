@@ -149,8 +149,10 @@ async def casual_caller_agent(ctx: agents.JobContext):
 
     # Get optional model configurations from environment
     groq_stt_model = os.getenv("GROQ_STT_MODEL", "whisper-large-v3-turbo")
-    groq_tts_model = os.getenv("GROQ_TTS_MODEL", "playai-tts")
-    groq_tts_voice = os.getenv("GROQ_TTS_VOICE", "Arista-PlayAI")
+    # Note: Groq TTS now uses canopylabs/orpheus-v1-english as the default model
+    # and "autumn" as the default voice (playai-tts and Arista-PlayAI are deprecated)
+    groq_tts_model = os.getenv("GROQ_TTS_MODEL", "canopylabs/orpheus-v1-english")
+    groq_tts_voice = os.getenv("GROQ_TTS_VOICE", "autumn")
     hf_llm_model = os.getenv("HF_LLM_MODEL", "meta-llama/Llama-3.1-8B-Instruct")
 
     # Create agent session with Groq STT/TTS + HuggingFace LLM
