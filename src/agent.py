@@ -140,13 +140,12 @@ async def casual_caller_agent(ctx: agents.JobContext):
     # Get optional model configurations from environment
     groq_stt_model = os.getenv("GROQ_STT_MODEL", "whisper-large-v3-turbo")
     groq_llm_model = os.getenv("GROQ_LLM_MODEL", "llama-3.3-70b-versatile")
-    # Groq TTS - using PlayAI models
-    # Available models: "playai-tts", "playai-tts-arabic"
-    # Available voices for playai-tts: "Arista-PlayAI", "Atlas-PlayAI", "Basil-PlayAI", 
-    #   "Bridget-PlayAI", "Caldwell-PlayAI", "Cam-PlayAI", "Cecily-PlayAI", 
-    #   "Charlotte-PlayAI", "Chelsie-PlayAI", "Drexton-PlayAI"
-    groq_tts_model = os.getenv("GROQ_TTS_MODEL", "playai-tts")
-    groq_tts_voice = os.getenv("GROQ_TTS_VOICE", "Arista-PlayAI")
+    # Groq TTS - using Orpheus models
+    # Available models: "canopylabs/orpheus-v1-english", "canopylabs/orpheus-arabic-saudi"
+    # Available voices for orpheus-v1-english: "autumn", "diana", "hannah", "austin", "daniel", "troy"
+    # Available voices for orpheus-arabic-saudi: "fahad", "sultan", "lulwa", "noura"
+    groq_tts_model = os.getenv("GROQ_TTS_MODEL", "canopylabs/orpheus-v1-english")
+    groq_tts_voice = os.getenv("GROQ_TTS_VOICE", "autumn")
 
     # Create agent session with Groq for everything (STT, LLM, TTS)
     session = AgentSession(
