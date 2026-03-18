@@ -17,7 +17,7 @@ from livekit.agents import (
     room_io,
 )
 from livekit.plugins import noise_cancellation, silero
-from livekit.plugins import groq
+from livekit.plugins import groq, cartesia
 
 load_dotenv(".env.local")
 
@@ -140,14 +140,18 @@ async def casual_caller_agent(ctx: agents.JobContext):
     # Get optional model configurations from environment
     groq_stt_model = os.getenv("GROQ_STT_MODEL", "whisper-large-v3-turbo")
     groq_llm_model = os.getenv("GROQ_LLM_MODEL", "llama-3.3-70b-versatile")
-    # Groq TTS - using Orpheus models
-    # Available models: "canopylabs/orpheus-v1-english", "canopylabs/orpheus-arabic-saudi"
-    # Available voices for orpheus-v1-english: "autumn", "diana", "hannah", "austin", "daniel", "troy"
-    # Available voices for orpheus-arabic-saudi: "fahad", "sultan", "lulwa", "noura"
-    groq_tts_model = os.getenv("GROQ_TTS_MODEL", "canopylabs/orpheus-v1-english")
-    groq_tts_voice = os.getenv("GROQ_TTS_VOICE", "autumn")
+    
+    # Cartesia TTS - Groq discontinued their TTS service
+    # Available models: "sonic-3", "sonic-2", "sonic-turbo", "sonic"
+    # Available voices: Use voice ID from https://play.cartesia.ai/voices
+    # Sample English voices:
+    #   - "9626c31c-bec5-4cca-baa8-f8ba9e84c8bc" (Jacqueline - confident American female)
+    #   - "a167e0f3-df7e-4d52-a9c3-f949145efdab" (Blake - energetic American male)
+    #   - "f786b574-daa5-4673-aa0c-cbe3e8534c02" (Default voice)
+    cartesia_tts_model = os.getenv("CARTESIA_TTS_MODEL", "sonic-3")
+    cartesia_tts_voice = os.getenv("CARTESIA_TTS_VOICE", "9626c31c-bec5-4cca-baa8-f8ba9e84c8bc")
 
-    # Create agent session with Groq for everything (STT, LLM, TTS)
+    # Create agent session with Groq for STT/LLM and Cartesia for TTS
     session = AgentSession(
         stt=groq.STT(
             model=groq_stt_model,
@@ -158,9 +162,10 @@ async def casual_caller_agent(ctx: agents.JobContext):
             temperature=0.7,
             max_completion_tokens=256,
         ),
-        tts=groq.TTS(
-            model=groq_tts_model,
-            voice=groq_tts_voice,
+        tts=cartesia.TTS(
+            model=cartesia_tts_model,
+            voice=cartesia_tts_voice,
+            language="en",
         ),
         vad=silero.VAD.load(),
     )
