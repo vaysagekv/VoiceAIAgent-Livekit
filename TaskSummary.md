@@ -155,3 +155,246 @@ CARTESIA_API_KEY=your-cartesia-api-key-here
 4. **Dependencies:** Your `pyproject.toml` already has the required plugins: `livekit-plugins-openai`, `livekit-plugins-deepgram`, `livekit-plugins-cartesia`.
 
 5. **Costs:** You'll now manage billing directly with OpenAI, Deepgram, and Cartesia instead of through LiveKit Cloud.
+
+
+## Plan for HuggingFace
+Based on my research of the LiveKit Agents SDK, I found there are **three main approaches** to use HuggingFace models instead of Deepgram/OpenAI/Cartesia. Here's a detailed plan for your `src/agent.py` code changes:
+
+---
+
+## Option 1: HuggingFace Inference API (Easiest - No Custom Plugin)
+
+Use HuggingFace's OpenAI-compatible Serverless API or TGI endpoints.
+
+**Required `.env.local` changes:**
+```bash
+HF_API_KEY=hf_xxx
+HF_LLM_MODEL=microsoft/DialoGPT-medium  # or meta-llama/Llama-3-8B-Instruct, etc.
+HF_STT_MODEL=SuyKam/whisper-small-espanol  # or any Whisper model on HF
+HF_TTS_MODEL=microsoft/speecht5_tts  # or any TTS model
+```
+
+**Code changes for `src/agent.py`:**
+
+1. Replace imports:
+```python
+# Remove:
+from livekit.plugins import openai, deepgram, cartesia
+
+# Add:
+from livekit.plugins import openai
+# Or use requests/aiohttp directly for models not OpenAI-compatible
+```
+
+2. Replace STT with HuggingFace Whisper API:
+```python
+# Instead of:
+stt=deepgram.STT(model="nova-3", language="multi")
+
+# Use OpenAI-compatible wrapper pointing to HuggingFace:
+stt=openai.STT(
+    model="SuyKam/whisper-small-espanol",  # or any HF Whisper model
+    api_key=os.getenv("HF_API_KEY"),
+    base_url="https://api-inference.huggingface.co/v1",  # Serverless API
+    # OR for dedicated inference endpoint:
+    # base_url="https://your-endpoint.huggingface.cloud/v1",
+)
+```
+
+3. Replace LLM with HuggingFace model:
+```python
+# Instead of:
+llm=openai.responses.LLM(model="gpt-4.1-mini"),
+
+# Use:
+llm=openai.LLM(
+    model="microsoft/DialoGPT-medium",  # or meta-llama/Llama-3-8B-Instruct
+    api_key=os.getenv("HF_API_KEY"),
+    base_url="https://api-inference.huggingface.co/v1",
+)
+```
+
+4. Replace TTS with HuggingFace TTS:
+```python
+# Instead of:
+tts=cartesia.TTS(model="sonic-3", voice="..."),
+
+# Use a HuggingFace TTS endpoint via HTTP calls in a custom TTS class
+# (see Option 2 for custom implementation, or use existing HF TTS SDK)
+```
+
+---
+
+## Option 2: Local Transformers Models (Full Control, No API Calls)
+
+Run models locally using `transformers`, `torch`, `onnxruntime`, etc.
+
+**Required package installation:**
+```bash
+pip install transformers torch accelerate onnxruntime huggingface_hub
+pip install TTS  # For coqui TTS or similar
+pip install faster-whisper  # For local Whisper
+```
+
+**Code changes for `src/agent.py`:**
+
+1. Add imports and create wrapper classes:
+```python
+from livekit.agents import llm, stt, tts
+from livekit.agents.llm import LLM, ChatMessage
+from typing import AsyncIterator
+import torch
+from transformers import AutoModelForCausalLM, AutoTokenizer, pipeline
+from faster_whisper import WhisperModel
+from TTS.api import TTS as CoquiTTS
+
+# Custom local LLM implementation
+class HuggingFaceLLM(LLM):
+    def __init__(self, model_name: str = "microsoft/DialoGPT-medium"):
+        super().__init__()
+        self.model_name = model_name
+        self.device = "cuda" if torch.cuda.is_available() else "cpu"
+        
+        # Load model once at initialization
+        self.tokenizer = AutoTokenizer.from_pretrained(model_name)
+        self.model = AutoModelForCausalLM.from_pretrained(
+            model_name,
+            torch_dtype=torch.float16 if self.device == "cuda" else torch.float32,
+            device_map="auto" if self.device == "cuda" else None,
+        )
+        
+    async def chat(self, chat_ctx, fnc_ctx=None, temperature=0.8) -> AsyncIterator[llm.ChatChunk]:
+        # Convert LiveKit chat context to HF format
+        messages = self._convert_chat_context(chat_ctx)
+        
+        # Tokenize and generate
+        inputs = self.tokenizer.apply_chat_template(
+            messages, 
+            return_tensors="pt",
+            return_dict=True
+        ).to(self.device)
+        
+        # Stream the output
+        with torch.no_grad():
+            outputs = self.model.generate(
+                **inputs,
+                max_new_tokens=256,
+                temperature=temperature,
+                do_sample=True,
+                pad_token_id=self.tokenizer.eos_token_id,
+            )
+        
+        generated_text = self.tokenizer.decode(outputs[0], skip_special_tokens=True)
+        
+        # Yield as ChatChunk
+        yield llm.ChatChunk(
+            delta=llm.ChoiceDelta(content=generated_text, role="assistant")
+        )
+
+# Custom local STT implementation  
+class HuggingFaceSTT(stt.STT):
+    def __init__(self, model_size: str = "base"):
+        super().__init__(
+            capabilities=stt.STTCapabilities(
+                streaming=False,
+                interim_results=False,
+            )
+        )
+        # Load Whisper model locally
+        self.model = WhisperModel(model_size, device="cpu", compute_type="int8")
+        
+    async def recognize(self, buffer, language="en"):
+        # Convert audio buffer and transcribe
+        segments, info = self.model.transcribe(buffer, language=language)
+        text = " ".join([segment.text for segment in segments])
+        
+        # Return speech event
+        return stt.SpeechEvent(
+            type=stt.SpeechEventType.FINAL_TRANSCRIPT,
+            alternatives=[stt.SpeechData(text=text, language=language)]
+        )
+
+# Custom local TTS implementation
+class HuggingFaceTTS(tts.TTS):
+    def __init__(self, model_name: str = "tts_models/en/ljspeech/tacotron2-DDC"):
+        super().__init__(
+            capabilities=tts.TTSCapabilities(streaming=False),
+            sample_rate=22050,
+        )
+        # Load local TTS model
+        self.tts = CoquiTTS(model_name)
+        
+    async def synthesize(self, text: str):
+        # Generate audio
+        wav = self.tts.tts(text=text)
+        
+        # Return audio emitter with generated audio
+        # (implementation details for audio streaming)
+        return self._create_audio_stream(wav)
+```
+
+2. Update AgentSession:
+```python
+session = AgentSession(
+    stt=HuggingFaceSTT(model_size="base"),
+    llm=HuggingFaceLLM(model_name="microsoft/DialoGPT-medium"),
+    tts=HuggingFaceTTS(model_name="tts_models/en/ljspeech/tacotron2-DDC"),
+    vad=silero.VAD.load(),
+)
+```
+
+---
+
+## Option 3: LiteLLM Gateway (Drop-in Compatibility)
+
+Use LiteLLM as an OpenAI-compatible proxy for HuggingFace models.
+
+**Setup:**
+```bash
+pip install litellm
+# Run gateway: litellm --model huggingface/mistralai/Mistral-7B-Instruct-v0.1
+```
+
+**Code changes for `src/agent.py`:**
+
+1. Update imports:
+```python
+from livekit.plugins import openai
+```
+
+2. Update AgentSession to use LiteLLM proxy:
+```python
+session = AgentSession(
+    stt=openai.STT(
+        model="whisper-1",
+        api_key="not-needed",
+        base_url="http://localhost:4000",  # LiteLLM proxy
+    ),
+    llm=openai.LLM(
+        model="huggingface/mistralai/Mistral-7B-Instruct-v0.1",
+        api_key="not-needed",
+        base_url="http://localhost:4000",
+    ),
+    tts=openai.TTS(
+        model="tts-1",
+        api_key="not-needed", 
+        base_url="http://localhost:4000",
+    ),
+    vad=silero.VAD.load(),
+)
+```
+
+---
+
+## Recommendation
+
+| Approach | Latency | Complexity | Cost | Best For |
+|----------|---------|------------|------|----------|
+| **Option 1: HF Inference API** | Higher (network) | Low | Pay-per-use | Quick prototyping, no GPU |
+| **Option 2: Local Models** | Low (local) | High | Free (own hardware) | Privacy, high volume, have GPU |
+| **Option 3: LiteLLM** | Medium | Low | Proxy costs | Multiple model providers |
+
+**For your use case (casual phone conversations):**
+- Start with **Option 1** for quickest implementation
+- **Option 2** if you need data privacy and have GPU resources
+- **Option 3** if you want flexibility to switch between providers
