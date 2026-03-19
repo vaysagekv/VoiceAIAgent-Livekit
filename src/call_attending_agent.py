@@ -9,8 +9,9 @@ import json
 import logging
 import os
 from datetime import datetime
-from typing import Optional
+from typing import Optional, Dict, Any
 from uuid import uuid4
+from weakref import WeakKeyDictionary
 
 from dotenv import load_dotenv
 
@@ -27,6 +28,10 @@ from livekit.agents.beta.tools import EndCallTool
 from livekit.plugins import noise_cancellation, silero
 from livekit.plugins import groq, cartesia
 from livekit.plugins.turn_detector.multilingual import MultilingualModel
+
+# Global storage for session data (since JobContext doesn't have userdata)
+# Using WeakKeyDictionary to avoid memory leaks
+_session_data_store: WeakKeyDictionary = WeakKeyDictionary()
 
 load_dotenv(".env.local")
 
@@ -86,27 +91,55 @@ Remember: This is a voice conversation. Keep responses short enough to say in 10
         )
 
 
+def is_sip_participant(participant) -> bool:
+    """Check if participant is a SIP participant (phone caller).
+    
+    Args:
+        participant: Room participant to check
+        
+    Returns:
+        True if SIP participant, False otherwise
+    """
+    try:
+        # Try direct enum comparison
+        if participant.kind == rtc.ParticipantKind.PARTICIPANT_KIND_SIP:
+            return True
+        
+        # Try value comparison for compatibility
+        if hasattr(participant.kind, 'value'):
+            if participant.kind.value == rtc.ParticipantKind.PARTICIPANT_KIND_SIP.value:
+                return True
+        
+        # Try string comparison as fallback
+        kind_str = str(participant.kind).lower()
+        if 'sip' in kind_str:
+            return True
+            
+    except Exception:
+        pass
+    
+    return False
+
+
 def get_caller_phone_number(ctx: agents.JobContext) -> Optional[str]:
     """Extract caller's phone number from room participants.
+    
+    When testing from web browser, returns a dummy phone number.
     
     Args:
         ctx: JobContext with room information
         
     Returns:
-        Phone number if found, None otherwise
+        Phone number if found, dummy number for browser testing, None if error
     """
     try:
+        has_sip_participant = False
+        
         # Look for SIP participants (phone callers)
         for participant in ctx.room.remote_participants.values():
-            # SIP participants have attributes with phone number info
-            # Check both enum comparison and value comparison for testing
-            is_sip = (
-                participant.kind == rtc.ParticipantKind.PARTICIPANT_KIND_SIP or
-                (hasattr(participant.kind, 'value') and 
-                 participant.kind.value == rtc.ParticipantKind.PARTICIPANT_KIND_SIP.value)
-            )
-            
-            if is_sip:
+            if is_sip_participant(participant):
+                has_sip_participant = True
+                
                 # Try to get phone number from attributes
                 phone = participant.attributes.get("phone_number")
                 if phone:
@@ -130,11 +163,38 @@ def get_caller_phone_number(ctx: agents.JobContext) -> Optional[str]:
                     return phone
             except json.JSONDecodeError:
                 pass
+        
+        # If no SIP participant found, this is likely a web browser test
+        # Return a dummy phone number for testing
+        if not has_sip_participant:
+            logger.info("No SIP participant detected - using dummy phone number for browser testing")
+            return "+00000000000"
                 
     except Exception as e:
         logger.error(f"Error extracting phone number: {e}")
+        # Return dummy number on error for graceful handling
+        return "+00000000000"
     
     return None
+
+
+def get_participant_type(ctx: agents.JobContext) -> str:
+    """Determine if the caller is from a phone (SIP) or web browser.
+    
+    Args:
+        ctx: JobContext with room information
+        
+    Returns:
+        "phone" for SIP participants, "browser" for web participants
+    """
+    try:
+        for participant in ctx.room.remote_participants.values():
+            if is_sip_participant(participant):
+                return "phone"
+    except Exception:
+        pass
+    
+    return "browser"
 
 
 def is_after_hours() -> bool:
@@ -297,10 +357,21 @@ async def call_attending_agent_entry(ctx: agents.JobContext):
         
         # Wait a moment then end
         await asyncio.sleep(3)
-        await temp_session.close()
+        
+        # Close the session - handle if close method doesn't exist
+        try:
+            if hasattr(temp_session, 'close'):
+                await temp_session.close()
+            elif hasattr(temp_session, 'aclose'):
+                await temp_session.aclose()
+            else:
+                # If no close method, session will be garbage collected
+                logger.debug("No close method available on session, letting it cleanup naturally")
+        except Exception as e:
+            logger.debug(f"Error closing temporary session: {e}")
         
         # Save rejection log
-        phone = get_caller_phone_number(ctx)
+        phone = get_caller_phone_number(ctx) or "+00000000000"
         save_call_log(
             room_name=ctx.room.name,
             phone_number=phone,
@@ -315,10 +386,13 @@ async def call_attending_agent_entry(ctx: agents.JobContext):
     
     # Extract caller phone number
     phone_number = get_caller_phone_number(ctx)
+    participant_type = get_participant_type(ctx)
+    
     if phone_number:
-        logger.info(f"Incoming call from: {phone_number}")
+        logger.info(f"Incoming call from: {phone_number} (type: {participant_type})")
     else:
-        logger.warning("Could not extract caller phone number")
+        logger.warning("Could not extract caller phone number, using default")
+        phone_number = "+00000000000"
     
     # Get API keys
     groq_api_key = os.getenv("GROQ_API_KEY")
@@ -355,10 +429,17 @@ async def call_attending_agent_entry(ctx: agents.JobContext):
         preemptive_generation=True,  # Faster response times
     )
     
-    # Store session data for later retrieval
-    ctx.userdata["call_start_time"] = call_start_time
-    ctx.userdata["phone_number"] = phone_number
-    ctx.userdata["session"] = session
+    # Store session data for later retrieval using global store
+    # (JobContext doesn't have userdata attribute)
+    try:
+        _session_data_store[ctx] = {
+            "call_start_time": call_start_time,
+            "phone_number": phone_number,
+            "session": session,
+            "participant_type": participant_type,
+        }
+    except Exception as e:
+        logger.warning(f"Could not store session data: {e}")
     
     # Start the session
     await session.start(
@@ -398,10 +479,12 @@ async def handle_session_end(ctx: agents.JobContext):
         return
     
     try:
-        # Retrieve stored session data
-        call_start_time = ctx.userdata.get("call_start_time", datetime.now())
-        phone_number = ctx.userdata.get("phone_number")
-        session = ctx.userdata.get("session")
+        # Retrieve stored session data from global store
+        session_data = _session_data_store.get(ctx, {})
+        call_start_time = session_data.get("call_start_time", datetime.now())
+        phone_number = session_data.get("phone_number", "+00000000000")
+        session = session_data.get("session")
+        participant_type = session_data.get("participant_type", "unknown")
         
         call_end_time = datetime.now()
         
@@ -426,15 +509,22 @@ async def handle_session_end(ctx: agents.JobContext):
         # Save call log
         log_path = save_call_log(
             room_name=ctx.room.name,
-            phone_number=phone_number,
+            phone_number=phone_number or "+00000000000",
             start_time=call_start_time,
             end_time=call_end_time,
             transcript=transcript_data,
             call_summary=call_summary,
-            status="completed"
+            status=f"completed_{participant_type}"
         )
         
         logger.info(f"Call log saved: {log_path}")
+        
+        # Clean up session data
+        try:
+            if ctx in _session_data_store:
+                del _session_data_store[ctx]
+        except Exception:
+            pass
         
     except Exception as e:
         logger.error(f"Error in session end handler: {e}")
