@@ -453,18 +453,14 @@ async def call_attending_agent_entry(ctx: agents.JobContext):
         ),
     )
     
-    # Keep the session running
+    # Session runs in the background - wait for it to complete
+    # The on_session_end callback will handle cleanup when the session closes
     try:
-        while session.state != "closed":
-            await asyncio.sleep(1)
+        await session
     except asyncio.CancelledError:
         logger.info("Session cancelled")
     except Exception as e:
         logger.error(f"Session error: {e}")
-    finally:
-        # Ensure session is closed
-        if session.state != "closed":
-            await session.close()
 
 
 async def handle_session_end(ctx: agents.JobContext):
