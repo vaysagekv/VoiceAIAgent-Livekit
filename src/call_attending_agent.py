@@ -273,28 +273,26 @@ async def generate_call_summary(session: AgentSession) -> str:
         Generated summary string
     """
     try:
-        # Get conversation history
+        # Get conversation history from session.history.items
         history = []
-        for item in session.history:
-            if hasattr(item, 'content') and item.content:
-                role = getattr(item, 'role', 'unknown')
-                content = str(item.content)
-                history.append(f"{role}: {content}")
+        if hasattr(session, 'history') and hasattr(session.history, 'items'):
+            for item in session.history.items:
+                if item.type == "message":
+                    role = getattr(item, 'role', 'unknown')
+                    content = item.text_content if hasattr(item, 'text_content') else str(getattr(item, 'content', ''))
+                    history.append(f"{role}: {content}")
+                elif item.type == "function_call":
+                    history.append(f"function_call: {item.name}")
+                elif item.type == "function_call_output":
+                    history.append(f"function_output: {item.name}")
         
         if not history:
             return "No conversation recorded."
         
-        # Use LLM to generate summary
-        summary_prompt = f"""Summarize the following call conversation in 2-3 sentences.
-Focus on the caller's main requirement and any key details:
-
-{' | '.join(history[-10:])}  # Last 10 messages for context
-
-Summary:"""
-
         # For now, return a simple summary based on history
         # In production, you might want to call the LLM explicitly
-        return f"Call recorded with {len(history)} messages. Main topic: {history[-1] if history else 'N/A'}"
+        main_topic = history[-1] if history else 'N/A'
+        return f"Call recorded with {len(history)} messages. Main topic: {main_topic}"
         
     except Exception as e:
         logger.error(f"Error generating summary: {e}")
@@ -485,19 +483,54 @@ async def handle_session_end(ctx: agents.JobContext):
         call_end_time = datetime.now()
         
         # Generate session report if available
+        transcript_data = []
         try:
             report = ctx.make_session_report()
-            transcript_data = []
-            if hasattr(report, 'history'):
-                for item in report.history:
-                    transcript_data.append({
-                        "role": getattr(item, 'role', 'unknown'),
-                        "content": str(getattr(item, 'content', '')),
-                        "timestamp": getattr(item, 'timestamp', None),
-                    })
+            if report and hasattr(report, 'to_dict'):
+                report_dict = report.to_dict()
+                # Extract history from the report dictionary
+                history = report_dict.get('history', [])
+                for item in history:
+                    if isinstance(item, dict):
+                        transcript_data.append({
+                            "role": item.get('role', 'unknown'),
+                            "content": item.get('content', ''),
+                            "type": item.get('type', 'unknown'),
+                            "timestamp": item.get('timestamp'),
+                        })
+                    else:
+                        transcript_data.append({
+                            "role": getattr(item, 'role', 'unknown'),
+                            "content": str(getattr(item, 'content', '')),
+                            "type": getattr(item, 'type', 'unknown'),
+                            "timestamp": getattr(item, 'timestamp', None),
+                        })
+                logger.info(f"Session report generated with {len(transcript_data)} transcript items")
+            else:
+                logger.warning("Session report has no history or to_dict method")
         except Exception as e:
             logger.error(f"Error making session report: {e}")
-            transcript_data = []
+            
+        # Fallback: try to get transcript directly from session if report failed
+        if not transcript_data and session:
+            try:
+                if hasattr(session, 'history') and hasattr(session.history, 'items'):
+                    for item in session.history.items:
+                        if item.type == "message":
+                            transcript_data.append({
+                                "role": getattr(item, 'role', 'unknown'),
+                                "content": item.text_content if hasattr(item, 'text_content') else str(getattr(item, 'content', '')),
+                                "type": "message",
+                            })
+                        elif item.type == "function_call":
+                            transcript_data.append({
+                                "role": "assistant",
+                                "content": f"[Called function: {item.name}]",
+                                "type": "function_call",
+                            })
+                logger.info(f"Fallback: extracted {len(transcript_data)} items from session.history")
+            except Exception as e2:
+                logger.error(f"Fallback transcript extraction failed: {e2}")
         
         # Generate summary
         call_summary = await generate_call_summary(session) if session else "No summary available"

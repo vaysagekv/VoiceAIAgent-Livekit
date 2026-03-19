@@ -111,6 +111,7 @@ class TestCallAttendingAgent:
 class TestTimeBasedCallAcceptance:
     """Test time-based call acceptance logic."""
 
+    @patch('src.call_attending_agent.CALL_ATTEND_AFTER_HOUR', 17)
     @patch('src.call_attending_agent.datetime')
     def test_is_after_hours_before_threshold(self, mock_datetime):
         """Test that calls before threshold are rejected."""
@@ -124,6 +125,7 @@ class TestTimeBasedCallAcceptance:
         result = is_after_hours()
         assert result is False, "Should return False for times before threshold"
 
+    @patch('src.call_attending_agent.CALL_ATTEND_AFTER_HOUR', 17)
     @patch('src.call_attending_agent.datetime')
     def test_is_after_hours_at_threshold(self, mock_datetime):
         """Test that calls at threshold are accepted."""
@@ -137,6 +139,7 @@ class TestTimeBasedCallAcceptance:
         result = is_after_hours()
         assert result is True, "Should return True for times at threshold"
 
+    @patch('src.call_attending_agent.CALL_ATTEND_AFTER_HOUR', 17)
     @patch('src.call_attending_agent.datetime')
     def test_is_after_hours_after_threshold(self, mock_datetime):
         """Test that calls after threshold are accepted."""
@@ -150,6 +153,7 @@ class TestTimeBasedCallAcceptance:
         result = is_after_hours()
         assert result is True, "Should return True for times after threshold"
 
+    @patch('src.call_attending_agent.CALL_ATTEND_AFTER_HOUR', 17)
     @patch('src.call_attending_agent.datetime')
     def test_is_after_hours_midnight(self, mock_datetime):
         """Test that calls at midnight are accepted."""
@@ -229,16 +233,17 @@ class TestPhoneNumberExtraction:
         assert result == "+15553334444"
 
     def test_get_caller_phone_number_not_found(self):
-        """Test when phone number cannot be extracted."""
+        """Test when phone number cannot be extracted - returns dummy for browser testing."""
         mock_ctx = MagicMock()
         mock_ctx.room.remote_participants = {}
         mock_ctx.job.metadata = None
         
         result = get_caller_phone_number(mock_ctx)
-        assert result is None
+        # Returns dummy number for browser testing (no SIP participant)
+        assert result == "+00000000000"
 
     def test_get_caller_phone_number_standard_participant(self):
-        """Test that standard (non-SIP) participants are ignored."""
+        """Test that standard (non-SIP) participants return dummy number."""
         mock_ctx = MagicMock()
         mock_participant = MagicMock()
         mock_participant.kind = MagicMock()
@@ -249,7 +254,8 @@ class TestPhoneNumberExtraction:
         mock_ctx.job.metadata = None
         
         result = get_caller_phone_number(mock_ctx)
-        assert result is None
+        # Returns dummy number for browser testing (no SIP participant)
+        assert result == "+00000000000"
 
 
 class TestCallLogSaving:
@@ -385,29 +391,31 @@ class TestConfiguration:
         
         assert call_attending_agent.LOGS_DIR == "custom_logs"
 
-    def test_default_values(self):
-        """Test default configuration values."""
-        # Clear environment variables
-        env_vars = ["CALL_ATTEND_AFTER_HOUR", "CALL_ATTEND_AGENT_NAME", 
-                   "CALL_ATTEND_ENABLE_LOGGING", "CALL_ATTEND_LOGS_DIR"]
-        original_values = {}
-        for var in env_vars:
-            original_values[var] = os.environ.pop(var, None)
+    @patch('src.call_attending_agent.os.getenv')
+    def test_default_values(self, mock_getenv):
+        """Test default configuration values when no env vars are set."""
+        # Mock getenv to return None for our config vars (use defaults)
+        def side_effect(key, default=None):
+            config_vars = {
+                "CALL_ATTEND_AFTER_HOUR": None,
+                "CALL_ATTEND_AGENT_NAME": None,
+                "CALL_ATTEND_ENABLE_LOGGING": None,
+                "CALL_ATTEND_LOGS_DIR": None,
+            }
+            if key in config_vars:
+                return config_vars[key] if config_vars[key] is not None else default
+            return os.environ.get(key, default)
         
-        try:
-            import importlib
-            from src import call_attending_agent
-            importlib.reload(call_attending_agent)
-            
-            assert call_attending_agent.CALL_ATTEND_AFTER_HOUR == 17
-            assert call_attending_agent.AGENT_NAME == "Tina"
-            assert call_attending_agent.ENABLE_LOGGING is True
-            assert call_attending_agent.LOGS_DIR == "calllogs"
-        finally:
-            # Restore environment variables
-            for var, value in original_values.items():
-                if value is not None:
-                    os.environ[var] = value
+        mock_getenv.side_effect = side_effect
+        
+        import importlib
+        from src import call_attending_agent
+        importlib.reload(call_attending_agent)
+        
+        assert call_attending_agent.CALL_ATTEND_AFTER_HOUR == 17
+        assert call_attending_agent.AGENT_NAME == "Tina"
+        assert call_attending_agent.ENABLE_LOGGING is True
+        assert call_attending_agent.LOGS_DIR == "calllogs"
 
 
 class TestCallSummaryGeneration:
@@ -416,21 +424,40 @@ class TestCallSummaryGeneration:
     @pytest.mark.asyncio
     async def test_generate_call_summary_with_history(self):
         """Test summary generation with conversation history."""
+        # Create mock session with history.items structure
         mock_session = MagicMock()
-        mock_item = MagicMock()
-        mock_item.content = "I need help with my order"
-        mock_item.role = "user"
-        mock_session.history = [mock_item]
+        
+        # Create mock history items
+        mock_item1 = MagicMock()
+        mock_item1.type = "message"
+        mock_item1.role = "user"
+        mock_item1.text_content = "Hello, I need help with my order"
+        
+        mock_item2 = MagicMock()
+        mock_item2.type = "message"
+        mock_item2.role = "assistant"
+        mock_item2.text_content = "I'd be happy to help with your order"
+        
+        # Mock history.items as a list
+        mock_history = MagicMock()
+        mock_history.items = [mock_item1, mock_item2]
+        mock_session.history = mock_history
         
         result = await generate_call_summary(mock_session)
         
-        assert "1 messages" in result or "messages" in result
+        assert "2 messages" in result
+        # The last message content includes the role prefix
+        assert "help with your order" in result or "I'd be happy" in result
 
     @pytest.mark.asyncio
     async def test_generate_call_summary_empty_history(self):
         """Test summary generation with empty history."""
         mock_session = MagicMock()
-        mock_session.history = []
+        
+        # Mock empty history.items
+        mock_history = MagicMock()
+        mock_history.items = []
+        mock_session.history = mock_history
         
         result = await generate_call_summary(mock_session)
         
@@ -440,11 +467,37 @@ class TestCallSummaryGeneration:
     async def test_generate_call_summary_error_handling(self):
         """Test summary generation error handling."""
         mock_session = MagicMock()
-        mock_session.history = None  # This will cause an error
+        # Mock history as None - hasattr check will return False
+        mock_session.history = None
         
         result = await generate_call_summary(mock_session)
         
-        assert result == "Summary generation failed."
+        # When history is None, hasattr returns False, so it returns "No conversation recorded"
+        assert result == "No conversation recorded."
+
+    @pytest.mark.asyncio
+    async def test_generate_call_summary_function_call(self):
+        """Test summary generation includes function calls."""
+        mock_session = MagicMock()
+        
+        # Create mock history with function call
+        mock_item1 = MagicMock()
+        mock_item1.type = "message"
+        mock_item1.role = "user"
+        mock_item1.text_content = "I need to end the call"
+        
+        mock_item2 = MagicMock()
+        mock_item2.type = "function_call"
+        mock_item2.name = "end_call"
+        
+        mock_history = MagicMock()
+        mock_history.items = [mock_item1, mock_item2]
+        mock_session.history = mock_history
+        
+        result = await generate_call_summary(mock_session)
+        
+        assert "2 messages" in result
+        assert "end_call" in result
 
 
 if __name__ == "__main__":
