@@ -1,0 +1,3 @@
+# Call logs directory
+# This directory stores JSON call logs from the call attending agent
+# Files are automatically created with format: call_log_<timestamp>_<room_name>.json
