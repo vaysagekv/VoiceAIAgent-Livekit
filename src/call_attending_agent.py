@@ -245,9 +245,22 @@ Summary:"""
 server = AgentServer()
 
 
+def on_session_end_handler(ctx: agents.JobContext):
+    """Handler for session end - creates async task for cleanup."""
+    return asyncio.create_task(handle_session_end(ctx))
+
+
+def get_noise_canceller(params):
+    """Return appropriate noise canceller based on participant type."""
+    if params.participant.kind == rtc.ParticipantKind.PARTICIPANT_KIND_SIP:
+        return noise_cancellation.BVCTelephony()
+    else:
+        return noise_cancellation.BVC()
+
+
 @server.rtc_session(
     agent_name="call-attending-agent",
-    on_session_end=lambda ctx: asyncio.create_task(handle_session_end(ctx))
+    on_session_end=on_session_end_handler
 )
 async def call_attending_agent_entry(ctx: agents.JobContext):
     """Entry point for the call attending agent."""
@@ -353,11 +366,7 @@ async def call_attending_agent_entry(ctx: agents.JobContext):
         agent=CallAttendingAgent(),
         room_options=room_io.RoomOptions(
             audio_input=room_io.AudioInputOptions(
-                noise_cancellation=lambda params: (
-                    noise_cancellation.BVCTelephony() 
-                    if params.participant.kind == rtc.ParticipantKind.PARTICIPANT_KIND_SIP 
-                    else noise_cancellation.BVC()
-                ),
+                noise_cancellation=get_noise_canceller,
             ),
             close_on_disconnect=True,  # Auto-close when caller hangs up
         ),
