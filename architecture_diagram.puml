@@ -1,0 +1,55 @@
+@startuml
+
+skinparam backgroundColor #FEFEFE
+skinparam componentStyle rectangle
+
+title Option B: LiveKit Time-Based Routing (5 PM Threshold)
+
+package "TWILIO INFRASTRUCTURE" {
+    [Phone Caller] as Caller
+    [Twilio Phone Number] as TwilioNumber
+    [TwiMLbin\nDirect SIP Dial] as TwiMLbin
+    [LiveKit SIP Trunk] as SIPTrunk
+    
+    Caller --> TwilioNumber
+    TwilioNumber --> TwiMLbin
+    TwiMLbin --> SIPTrunk
+}
+
+package "LIVEKIT INFRASTRUCTURE" {
+    [Dispatch Rule] as DispatchRule
+    [CallAttending Agent] as Agent
+    
+    [Time Check\n17:00 Threshold\nGroq LLM] as TimeCheck
+    [Greeting & Record\nGroq STT + Cartesia TTS] as Greeting
+    [EndCall Tool\nLiveKit] as EndCall
+    [Call Log JSON] as CallLog
+    [Polite Decline\nCartesia TTS] as Decline
+    
+    SIPTrunk --> DispatchRule
+    DispatchRule --> Agent
+    Agent --> TimeCheck
+    TimeCheck --> Greeting : After 17:00
+    TimeCheck --> Decline : Before 17:00
+    Greeting --> CallLog
+    Greeting --> EndCall
+}
+
+note right of TimeCheck
+  **LiveKit Agent Time Check:**
+  if (current_hour >= 17):
+    accept call (after hours)
+  else:
+    decline call (office open)
+end note
+
+note right of Agent
+  **AI Models Used:**
+  - **STT:** Groq whisper-large-v3-turbo
+  - **LLM:** Groq llama-3.3-70b-versatile
+  - **TTS:** Cartesia sonic-3
+  - **VAD:** Silero VAD
+  - **Turn Detection:** LiveKit MultilingualModel
+end note
+
+@enduml
