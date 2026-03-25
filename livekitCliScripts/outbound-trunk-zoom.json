@@ -1,0 +1,10 @@
+{
+  "trunk": {
+    "name": "Twilio Zoom Outbound Trunk",
+    "address": "livekit-zoom.pstn.twilio.com",
+    "numbers": ["*"],
+    "authUsername": "livekit_zoom_user",
+    "authPassword": "your_twilio_sip_password_here",
+    "transport": "SIP_TRANSPORT_TCP"
+  }
+}

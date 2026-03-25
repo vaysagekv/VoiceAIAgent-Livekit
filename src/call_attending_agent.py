@@ -15,7 +15,7 @@ from weakref import WeakKeyDictionary
 
 from dotenv import load_dotenv
 
-from livekit import agents, rtc
+from livekit import agents, api, rtc
 from livekit.agents import (
     Agent,
     AgentServer,
@@ -205,6 +205,66 @@ def is_after_hours() -> bool:
     """
     now = datetime.now()
     return now.hour >= CALL_ATTEND_AFTER_HOUR
+
+
+async def dial_zoom_meeting(
+    ctx: agents.JobContext,
+    meeting_id: str,
+    meeting_password: Optional[str] = None,
+) -> bool:
+    """Dial into a Zoom meeting via SIP.
+    
+    This function allows the agent to join a Zoom meeting by dialing
+    Zoom's SIP Room Connector. Requires ZOOM_SIP_TRUNK_ID to be configured.
+    
+    Args:
+        ctx: JobContext for the agent
+        meeting_id: Zoom meeting ID (numeric, no spaces)
+        meeting_password: Optional meeting password
+        
+    Returns:
+        True if call was successfully initiated, False otherwise
+    """
+    trunk_id = os.getenv("ZOOM_SIP_TRUNK_ID")
+    if not trunk_id:
+        logger.error("ZOOM_SIP_TRUNK_ID not configured in environment")
+        return False
+
+    # Construct Zoom SIP URI: meeting-id@zoomcrc.com
+    zoom_sip_uri = f"{meeting_id}@zoomcrc.com"
+    
+    # If password is provided: meeting-id.password@zoomcrc.com
+    if meeting_password:
+        zoom_sip_uri = f"{meeting_id}.{meeting_password}@zoomcrc.com"
+
+    caller_id_name = os.getenv("ZOOM_CALLER_ID_NAME", "AI Agent")
+
+    logger.info(f"Dialing Zoom meeting: {meeting_id} via SIP")
+    
+    try:
+        participant = await ctx.api.sip.create_sip_participant(
+            api.CreateSIPParticipantRequest(
+                room_name=ctx.room.name,
+                sip_trunk_id=trunk_id,
+                sip_call_to=zoom_sip_uri,
+                participant_identity=f"zoom-{meeting_id}",
+                participant_name=caller_id_name,
+                wait_until_answered=True,
+                play_dialtone=True,
+            )
+        )
+        
+        logger.info(f"Successfully connected to Zoom meeting: {participant}")
+        return True
+        
+    except api.TwirpError as e:
+        sip_code = e.metadata.get('sip_status_code')
+        sip_status = e.metadata.get('sip_status')
+        logger.error(f"Failed to dial Zoom: SIP {sip_code} - {sip_status}")
+        return False
+    except Exception as e:
+        logger.error(f"Error dialing Zoom meeting: {e}")
+        return False
 
 
 def save_call_log(
