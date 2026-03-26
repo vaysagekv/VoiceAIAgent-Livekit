@@ -57,6 +57,11 @@ Remember: You are on a phone connection in a Zoom meeting. Audio quality may var
 server = AgentServer()
 
 
+def on_session_end(ctx):
+    """Callback for when a session ends."""
+    logger.info(f"Session ended: {ctx.room.name}")
+
+
 async def dial_zoom_meeting(
     ctx: agents.JobContext,
     meeting_id: str,
@@ -118,7 +123,7 @@ async def dial_zoom_meeting(
 
 @server.rtc_session(
     agent_name="zoom-dialing-agent",
-    on_session_end=lambda ctx: logger.info(f"Session ended: {ctx.room.name}")
+    on_session_end=on_session_end,
 )
 async def zoom_agent_entry(ctx: agents.JobContext):
     """Entry point for the Zoom dialing agent."""
